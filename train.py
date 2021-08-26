@@ -3,37 +3,12 @@ import torch
 from constants import *
 from transformer import *
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader
 
 device = ("cuda" if torch.cuda.is_available() else "cpu")
 
-def generate_square_subsequent_mask(sz):
-    mask = (
-        torch.triu(
-            torch.ones(
-                (sz,sz),
-                device = device
-            )
-        )==1
-    ).transpose(0,1)
 
-    mask = mask.float().masked_fill(mask==0,float('-inf')).masked_fill(mask==1,float(0.0))
-
-    return mask
-
-#During training, we need a subsequent word mask that will 
-#prevent model to look into the future words when making predictions
-
-def create_mask(src,tgt):
-    src_seq_len = src.shape[0]
-    tgt_seq_len = tgt.shape[0]
-
-    tgt_mask = generate_square_subsequent_mask(tgt_seq_len)
-    src_mask = torch.zeros((src_seq_len,src_seq_len),device=device).type(torch.bool)
-
-    src_padding_mask = (src == pad_idx).transpose(0,1)
-    tgt_padding_mask = (tgt == pad_idx).transpose(0,1)
-
-    return src_mask,tgt_mask,src_padding_mask,tgt_padding_mask
 
 transformer = S2S_Transformer(
         NUM_ENCODER_LAYERS,
@@ -60,4 +35,92 @@ optimizer = torch.optim.Adam(
                 eps=1e-9,
                 momentum=0.9
             )
+
+
+text_transform = {}
+for lang in [SRC_lang,TGT_lang]:
+    text_transform[lang] = sequential_transforms(
+                                token_transform[lang],
+                                vocab_transform[lang],
+                                tensor_transform)
+
+# combine (collate) data into  batch of tensors                     
+def collate_fn(batch):
+    src_batch, tgt_batch = [], []
+
+    for src_sample,tgt_sample in batch:
+        src_batch.append(text_transform[SRC_lang](src_sample.rstrip("\n")))
+        tgt_batch.append(text_transform[TGT_lang](tgt_sample.rstrip("\n")))
+
+    src_batch = pad_sequence(src_batch,padding_value = pad_idx)
+    tgt_batch = pad_sequence(tgt_batch,padding_value = pad_idx)
+
+    return src_batch, tgt_batch
+
+
+
+def train_epoch(model,optimizer):
+    model.train()
+    running_loss = 0
+
+    train_iter = Multi30k(split="train",language_pair=(SRC_lang,TGT_lang))
+    train_dataloader = DataLoader(train_iter, batch_size=BATCH_SIZE,collate_fn=collate_fn)
+
+    for src,tgt in train_dataloader:
+        src = src.to(device)
+        tgt = tgt.to(device)
+
+        tgt_in = tgt[:-1,:]
+        
+        src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src,tgt_in)
+
+        logits = model(
+                src,
+                tgt_in,
+                src_mask,
+                tgt_mask,
+                src_padding_mask,
+                tgt_padding_mask,
+                src_padding_mask
+            )
+
+        optimizer.zero_grad()
+        
+        tgt_out = tgt[1:,:]
+        loss = loss_fn(logits.reshape(-1,logits.shape[-1]),tgt_out.reshape(-1))
+        loss.backward()
+
+        optimizer.step()
+        running_loss += loss.item()
+
+    return running_loss/len(train_dataloader)
+
+
+def evaluate(model):
+    model.eval()
+
+    running_loss = 0
+    val_iter = Multi30k(split="valid",language_pair=(SRC_lang,TGT_lang))
+    val_dataloader = DataLoader(val_iter,batch_size = BATCH_SIZE, collate_fn=collate_fn)
+
+    for src,tgt in val_dataloader:
+        src = src.to(device)
+        tgt = tgt.to(device)
+
+        tgt_in = tgt[:-1,:]
+        src_mask,tgt_mask,src_padding_mask,tgt_padding_mask = create_mask(src,tgt_in)
+
+        logits = model(
+            src,
+            tgt_in,
+            src_mask,
+        )
+
+        tgt_out = tgt[1:,:]
+        loss = loss_fn(logits.reshape(-1,logits.shape[-1]))
+        
+        running_loss+=loss.item()
+
+    
+    return running_loss/len(val_dataloader)
 
