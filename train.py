@@ -1,15 +1,14 @@
-from data import *
 import torch
-import os
 torch.cuda.empty_cache()
 
+from data import *
 from constants import *
 from transformer import *
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 from timeit import default_timer
-
+import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
