@@ -2,8 +2,11 @@ import torch
 import torch.nn as nn
 import math
 from constants import *
+from torch import Tensor
 
-device = torch.devices("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 
 class PositionalEncoding(nn.Module):
 
@@ -150,9 +153,56 @@ def sequential_transforms(*transforms):
     return func
 
 def tensor_transform(token_ids:List[int]):
-    return torch.cat((
-        torch.tensor([bos_idx]),
-        torch.tensor([token_ids]),
-        torch.tensor([eos_idx])
-    ))
+    return torch.cat((torch.tensor([bos_idx]),torch.tensor(token_ids),torch.tensor([eos_idx])))
 
+
+#function to generate output sequence
+
+def decode_greedy(model,src,src_mask,max_len,start_symbol):
+    src = src.to(device)
+    src_mask = src_mask.to(device)
+
+    memory = model.encode(src,src_mask)
+    y = torch.ones(1,1).fill_(start_symbol).type(torch.long).to(device)
+    
+    for i in range(max_len-1):
+        memory = memory.to(device)
+        tgt_mask = (generate_square_subsequent_mask(y.size(0))).type(torch.bool).to(device)
+        
+        out = model.decode(y,memory,tgt_mask).transpose(0,1)
+        prob = model.generator(out[:,-1])
+        _, next_word = torch.max(prob,dim=-1)
+        next_word = next_word.item()
+
+        y = torch.cat([y,torch.ones(1,1).type_as(src.data).fill_(next_word)],dim=0)
+
+        if next_word == eos_idx:
+            break
+
+    return y
+
+text_transform = {}
+for lang in [SRC_lang,TGT_lang]:
+    text_transform[lang] = sequential_transforms(
+                                token_transform[lang],
+                                vocab_transform[lang],
+                                tensor_transform)
+
+
+def translate(model:nn.Module,src_sentence:str):
+    model.eval()
+    src = text_transform[SRC_lang](src_sentence).view(-1,1)
+    num_tokens = src.shape[0]
+    src_mask = (torch.zeros(num_tokens,num_tokens)).type(torch.bool)
+    
+    tgt_tokens = decode_greedy(
+        model,
+        src,
+        src_mask,
+        max_len=num_tokens+5,
+        start_symbol=bos_idx
+    ).flatten()
+
+
+    return " ".join(
+        vocab_transform[TGT_lang].lookup_tokens(list(tgt_tokens.cpu().numpy()))).replace("<bos>","").replace("<eos>","")

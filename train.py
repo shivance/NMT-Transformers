@@ -1,12 +1,17 @@
 from data import *
 import torch
+
+torch.cuda.empty_cache()
+
 from constants import *
 from transformer import *
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
+from timeit import default_timer
 
-device = ("cuda" if torch.cuda.is_available() else "cpu")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 
@@ -33,16 +38,9 @@ optimizer = torch.optim.Adam(
                 lr=0.0001,
                 betas=(0.9,0.98),
                 eps=1e-9,
-                momentum=0.9
             )
 
 
-text_transform = {}
-for lang in [SRC_lang,TGT_lang]:
-    text_transform[lang] = sequential_transforms(
-                                token_transform[lang],
-                                vocab_transform[lang],
-                                tensor_transform)
 
 # combine (collate) data into  batch of tensors                     
 def collate_fn(batch):
@@ -123,4 +121,18 @@ def evaluate(model):
 
     
     return running_loss/len(val_dataloader)
+
+print("Starting Training")
+
+for epoch in range(NUM_EPOCHS):
+    st = default_timer()
+    train_loss = train_epoch(transformer,optimizer)
+    ft = default_timer()
+
+    val_loss = evaluate(transformer)
+    print(f"Epoch : {epoch}  Train Loss : {train_loss:.3f}  Val Loss : {val_loss:.3f}")
+    print(f"Epoch Time : {(ft-st):.3f}s")
+
+torch.save(transformer.state_dict(),MODEL_PATH)
+
 
