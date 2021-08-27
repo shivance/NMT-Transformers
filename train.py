@@ -108,14 +108,11 @@ def evaluate(model):
         tgt_in = tgt[:-1,:]
         src_mask,tgt_mask,src_padding_mask,tgt_padding_mask = create_mask(src,tgt_in)
 
-        logits = model(
-            src,
-            tgt_in,
-            src_mask,
-        )
+        logits = model(src,tgt_in,src_mask,tgt_mask,src_padding_mask, tgt_padding_mask, src_padding_mask)
 
         tgt_out = tgt[1:,:]
-        loss = loss_fn(logits.reshape(-1,logits.shape[-1]))
+        loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
+
         
         running_loss+=loss.item()
 
