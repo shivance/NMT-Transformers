@@ -1,6 +1,6 @@
 from data import *
 import torch
-
+import os
 torch.cuda.empty_cache()
 
 from constants import *
@@ -25,14 +25,15 @@ transformer = S2S_Transformer(
         FFN_HID_DIM    
     )
 
-for param in transformer.parameters():
-    if param.dim()>1:
-        nn.init.xavier_uniform_(param)
+if os.path.exists(MODEL_PATH):
+    transformer.load_state_dict(torch.load(MODEL_PATH))
+else:
+    for param in transformer.parameters():
+        if param.dim()>1:
+            nn.init.xavier_uniform_(param)
 
 transformer = transformer.to(device)
-
 loss_fn = nn.CrossEntropyLoss(ignore_index = pad_idx)
-
 optimizer = torch.optim.Adam(
                 transformer.parameters(),
                 lr=0.0001,
